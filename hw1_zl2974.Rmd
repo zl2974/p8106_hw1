@@ -1,0 +1,71 @@
+---
+title: "Homework_1"
+author: "Jeffrey LIANG"
+date: "2/4/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(caret)
+
+knitr::opts_chunk$set(
+  fig.height = 6,
+  fig.width = 8,
+  message = F,
+  echo = T,
+  warning = F,
+  cache = T
+)
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  digits = 3
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+```
+
+
+```{r}
+set.seed(123123)
+sl_tr =
+  read_csv(here::here("solubility_train.csv")) %>% 
+  janitor::clean_names()
+
+sl_ts =
+  read_csv(here::here("solubility_test.csv")) %>% 
+  janitor::clean_names()
+
+x_tr = model.matrix(solubility ~ ., sl_tr)[, -1]
+
+y_tr = sl_tr$solubility
+```
+
+
+# Q1
+```{r lm}
+sl_lm =
+  train(solubility~.,
+        data = sl_tr,
+        method = "lm",
+        trControl = 
+          trainControl(
+            method = "cv",
+            number = 10,
+            repeats = 50
+          ))
+
+sl_lm
+
+sl_lm_pre = predict.train(sl_lm,newdata = sl_ts)
+
+RMSE(sl_lm_pre,sl_ts$solubility)
+```
+# Q2
+```{r }
+
+```
+
