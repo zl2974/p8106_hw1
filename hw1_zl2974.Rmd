@@ -8,6 +8,7 @@ output: pdf_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(caret)
+library(pls)
 
 knitr::opts_chunk$set(
   fig.height = 6,
@@ -39,9 +40,9 @@ sl_ts =
   read_csv(here::here("solubility_test.csv")) %>% 
   janitor::clean_names()
 
-x_tr = model.matrix(solubility ~ ., sl_tr)[, -1]
+x_ts = model.matrix(solubility ~ ., sl_ts)[, -1]
 
-y_tr = sl_tr$solubility
+y_ts = sl_ts$solubility
 ```
 
 
@@ -53,19 +54,110 @@ sl_lm =
         method = "lm",
         trControl = 
           trainControl(
-            method = "cv",
+            method = "repeatedcv",
             number = 10,
-            repeats = 50
+            repeats = 5
           ))
 
-sl_lm
 
-sl_lm_pre = predict.train(sl_lm,newdata = sl_ts)
-
-RMSE(sl_lm_pre,sl_ts$solubility)
+RMSE(predict(sl_lm,newdata = sl_ts),sl_ts$solubility)
 ```
 # Q2
-```{r }
+```{r ridge}
+sl_ridge =
+  train(
+    solubility ~ .,
+    data = sl_tr,
+    method = "glmnet",
+    tuneGrid =
+      expand.grid(alpha = 0,
+           lambda = exp(seq(from = -1,to =-3, length = 1000))),
+    trControl =
+      trainControl(method = "repeatedcv",
+                   number = 10,
+                   repeats = 5),
+    preProcess = c("center","scale")
+  )
 
+plot(sl_ridge, xTrans = log)
+
+sl_ridge$bestTune
+
+RMSE(predict(sl_ridge,s="lambda.min",newx = sl_ts),sl_ts$solubility)
+```
+
+
+# Q3
+```{r}
+sl_lasso =
+  train(
+    solubility~.,
+    data = sl_tr,
+    method = "glmnet",
+    tuneGrid = 
+      expand.grid(alpha = 1,
+             lambda = exp(seq(-6,to=1,length = 1000))),
+    trControl = 
+      trainControl(
+        method = "repeatedcv",
+        number = 10,
+        repeats = 5
+      ),
+    preProcess = 
+      c("center","scale")
+  )
+
+plot(sl_lasso,xTrans = log)
+
+sl_lasso$bestTune
+
+plotmo::plot_glmnet(
+  sl_lasso$finalModel
+)
+
+sum(coef(sl_lasso$finalModel, s = sl_lasso$bestTune$lambda)!=0)
+
+RMSE(predict(sl_lasso,s="lambda.min",newx = sl_ts),sl_ts$solubility)
+```
+
+
+# Q4
+```{r pcr}
+sl_pcr =
+  train(
+    solubility~.,
+    data = sl_tr,
+    method = "pcr",
+    tuneGrid = 
+      expand.grid(ncomp = seq(1,ncol(sl_tr))),
+    preProcess = c("center","scale"),
+    trControl =
+      trainControl(
+        method = "repeatedcv",
+        number = 10,
+        repeats = 5
+      )
+  )
+
+sl_pcr$bestTune
+
+validationplot(sl_pcr$finalModel,val.type = "MSEP")
+
+RMSE(predict(sl_pcr,x_ts),y_ts)
+
+mean((predict(sl_pcr,x_ts)-y_ts)^2)
+```
+
+
+```{r}
+resam = 
+  resamples(list(
+    lm = sl_lm,
+    ridge = sl_ridge,
+    lasso = sl_lasso,
+    pcr = sl_pcr
+  ))
+
+summary(resam)
 ```
 
