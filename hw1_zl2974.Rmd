@@ -159,5 +159,8 @@ resam =
   ))
 
 summary(resam)
+
+bwplot(resam, metric = "RMSE")
 ```
 
+By the resampling result, we can see that Lasso method has the best/lowest mean RMSE and MAE, as well as the highest $R^2$. Lasso will be chosen to use out of the four for its predictivity and goodness of fit.
