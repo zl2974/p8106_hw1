@@ -59,6 +59,8 @@ sl_lm =
             repeats = 5
           ))
 
+print("the RMSE of the model is")
+
 
 RMSE(predict(sl_lm,newdata = sl_ts),sl_ts$solubility)
 ```
@@ -83,7 +85,9 @@ plot(sl_ridge, xTrans = log)
 
 sl_ridge$bestTune
 
-RMSE(predict(sl_ridge,s="lambda.min",newx = sl_ts),sl_ts$solubility)
+print("the RMSE of the model is")
+
+RMSE(predict(sl_ridge,newdata = sl_ts),sl_ts$solubility)
 ```
 
 
@@ -107,6 +111,13 @@ sl_lasso =
       c("center","scale")
   )
 
+sl_lasso_1se = 
+  cv.glmnet(model.matrix(solubility~.,sl_tr)[,-1],
+          sl_tr$solubility,
+          alpha = 1,
+          lambda = exp(seq(-6,1,length =1000))
+          )
+
 plot(sl_lasso,xTrans = log)
 
 sl_lasso$bestTune
@@ -115,9 +126,13 @@ plotmo::plot_glmnet(
   sl_lasso$finalModel
 )
 
+print("we have following parameters left")
+
 sum(coef(sl_lasso$finalModel, s = sl_lasso$bestTune$lambda)!=0)
 
-RMSE(predict(sl_lasso,s="lambda.min",newx = sl_ts),sl_ts$solubility)
+print("the RMSE of the model is")
+
+RMSE(predict.train(sl_lasso,newdata = sl_ts),sl_ts$solubility)
 ```
 
 
@@ -143,9 +158,9 @@ sl_pcr$bestTune
 
 validationplot(sl_pcr$finalModel,val.type = "MSEP")
 
-RMSE(predict(sl_pcr,x_ts),y_ts)
+print("the RMSE of the model is")
 
-mean((predict(sl_pcr,x_ts)-y_ts)^2)
+RMSE(predict(sl_pcr,x_ts),y_ts)
 ```
 
 
