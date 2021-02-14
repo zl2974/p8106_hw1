@@ -8,6 +8,7 @@ output: pdf_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(caret)
+library(glmnet)
 library(pls)
 
 knitr::opts_chunk$set(
