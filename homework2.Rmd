@@ -14,6 +14,7 @@ library(splines)
 library(mgcv)
 library(pdp)
 library(earth)
+library(doParallel)
 
 knitr::opts_chunk$set(
   fig.height = 6,
@@ -34,7 +35,10 @@ options(
 scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
 
+```
 
+```{r}
+set.seed(123123)
 ```
 
 # Q1
@@ -69,7 +73,7 @@ skimr::skim_without_charts(clg_data)
 ```{r}
 clg_data %>% 
   select(-college,-outstate) %>% 
-  featurePlot(.,clg_data$outstate,plot = "scatter")
+  featurePlot(.,clg_data$outstate,plot = "scatter",row = 4)
 ```
 
 
@@ -126,38 +130,63 @@ clg_ss %>%
 
 
 # Q3
-```{r}
+```{r gam, cache=T}
+cl = makePSOCKcluster(5)# if windows, set to 1
+registerDoParallel(cl)
 clg_gam = 
   train(x = X_train,
         y = Y_train,
         method = "gam",
         trControl = ctrl
         )
+stopCluster(cl)
 
-par(mfrow = c(5,4))
+par(mfrow = c(4,4))
 
 plot(clg_gam$finalModel)
-
-expand.grid( x = names(clg_data),
-             y = names(clg_data)) %>% 
-  filter( x!=y, x != "outstate")
 
 vis.gam(clg_gam$finalModel,c("expend","apps"))
 ```
 
 # Q4
 
-```{r mars}
-clg_mars = 
+```{r mars,cache=T}
+cl = makePSOCKcluster(5) #if windows, set to 1
+registerDoParallel(cl)
+clg_mars =
   train(
     x = X_train,
     y = Y_train,
     method = "earth",
-    tuneGrid = expand.grid(
-      degree = 1:3,
-      nprune = 3:100
-    ),
+    tuneGrid = expand.grid(degree = 1:3,
+                           nprune = exp(
+                             seq(1, log(100), length = 10)
+                           )%/%1),
     trControl = ctrl
   )
+stopCluster(cl)
+
+clg_mars$finalModel$coefficients %>% 
+  knitr::kable(caption = "Hints")
+
+ggplot(clg_mars)
+
+p1 = pdp::partial(clg_mars, pred.var = c("grad_rate", "f_undergrad")) %>%
+  plotPartial(
+    levelplot = FALSE,
+    zlab = "yhat",
+    drape = TRUE,
+    screen = list(z = 20, x = -60)
+  )
+
+p2 = pdp::partial(clg_mars, pred.var = c("apps", "enroll")) %>%
+  plotPartial(
+    levelplot = FALSE,
+    zlab = "yhat",
+    drape = TRUE,
+    screen = list(z = 20, x = -60)
+  )
+
+grid.arrange(p1,p2,nrow = 2)
 ```
 
