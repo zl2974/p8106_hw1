@@ -47,10 +47,17 @@ set.seed(123123)
 clg_data =
   read_csv("College.csv") %>% 
   janitor::clean_names() %>% 
-  drop_na() %>% 
   mutate(
     college = as.factor(college)
   )
+
+skimr::skim_without_charts(clg_data)
+```
+
+Missing data is the respone, omitting the data instead of treating with data preprocessing.
+
+```{r data_preprocess}
+clg_data = clg_data %>% drop_na()
 
 train_index = createDataPartition(clg_data$outstate, p = 0.8, list = F)
 
@@ -68,9 +75,6 @@ X_ts = model.matrix(outstate ~., data = clg_test)[,-1]
 
 ctrl = trainControl(method = "repeatedcv",number = 5, repeats = 5)
 
-skimr::skim_without_charts(clg_data)
-```
-```{r}
 clg_data %>% 
   select(-college,-outstate) %>% 
   featurePlot(.,clg_data$outstate,plot = "scatter",row = 4)
@@ -82,15 +86,14 @@ clg_data %>%
 
 ```{r smooth_spline}
 clg_ss_cv = smooth.spline(clg_train$terminal, Y_train, cv = T)
+
 clg_ss =
   tibble(
     x = list(clg_train$terminal),
     y = list(Y_train),
     x_t = list(clg_test$terminal),
     y_t = list(Y_ts),
-    df = list(seq(2, (nrow(
-      clg_data
-    ) - 1), length = 5)%/%1)
+    df = list(seq(2, 20, length = 5)%/%1)
   ) %>%
   unnest(df) %>%
   mutate(model = pmap(list(x, y, df),
@@ -115,38 +118,60 @@ clg_ss =
   select(df, y_t, prediction, x_t) %>%
   unnest(c(prediction, y_t,x_t))
 
+clg_ss %>%
+  group_by(df) %>%
+  summarise(mse =
+              mean((y_t - prediction) ^ 2)) %>% 
+  knitr::kable(caption = "Smooth spline performance with different degree of freedom",digits = 3)
+
 ggplot(clg_ss) +
   geom_point(aes(x = x_t, y = y_t)) +
   geom_line(aes(x = x_t, y = prediction, color= df)) +
-  facet_wrap(df ~ ., nrow = 2)
-
-clg_ss %>% 
-  filter(df == clg_ss_cv$df) %>% 
-  arrange(x_t) %>% 
-  ggplot()+
-  geom_point(aes(x_t,y_t))+
-  geom_line(aes(x_t,prediction),color = "pink")
+  facet_wrap(df ~ ., nrow = 2) +
+  labs(title = "Smooth Spline")
 ```
+
+
+
+The model obtained from CV method has the degree of freedom of `r clg_ss_cv$df` and $\lambda = $ `r clg_ss_cv$lambda` has the lowest MSE in the model candidates.
+
 
 
 # Q3
 ```{r gam, cache=T}
 cl = makePSOCKcluster(5)# if windows, set to 1
+
 registerDoParallel(cl)
-clg_gam = 
-  train(x = X_train,
-        y = Y_train,
-        method = "gam",
-        trControl = ctrl
-        )
+
+clg_gam =
+  train(
+    x = X_train,
+    y = Y_train,
+    method = "gam",
+    tuneGrid = expand.grid(select = c(T, F),
+                           method  = c("GCV.cp", "REML")),
+    metric = "RMSE",
+    trControl = ctrl
+  )
+
 stopCluster(cl)
 
-par(mfrow = c(4,4))
+clg_gam$bestTune
+
+summary(clg_gam$finalModel)
+
+par(mfrow = c(2,4))
 
 plot(clg_gam$finalModel)
 
-vis.gam(clg_gam$finalModel,c("expend","apps"))
+par(mfrow=c(1,2))
+for (i in 1:8){
+  predictor = clg_gam$finalModel$terms %>% attr("term.labels") %>% .[(2*i-1):(2*i)]
+  vis.gam(clg_gam$finalModel,predictor)
+}
 ```
+
+Using caret tuning, the best tuning methods is `select = F` and `method = "REML"`
 
 # Q4
 
@@ -162,6 +187,7 @@ clg_mars =
                            nprune = exp(
                              seq(1, log(100), length = 10)
                            )%/%1),
+    metric = "RMSE",
     trControl = ctrl
   )
 stopCluster(cl)
@@ -170,6 +196,10 @@ clg_mars$finalModel$coefficients %>%
   knitr::kable(caption = "Hints")
 
 ggplot(clg_mars)
+
+clg_mars$bestTune
+
+summary(clg_mars$finalModel)
 
 p1 = pdp::partial(clg_mars, pred.var = c("grad_rate", "f_undergrad")) %>%
   plotPartial(
