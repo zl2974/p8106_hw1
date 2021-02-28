@@ -59,19 +59,11 @@ Missing data is the respone, omitting the data instead of treating with data pre
 ```{r data_preprocess}
 clg_data = clg_data %>% drop_na()
 
-train_index = createDataPartition(clg_data$outstate, p = 0.8, list = F)
-
-clg_train = clg_data[train_index,]
-
-clg_test = clg_data[-train_index,]
+clg_train = clg_data
 
 Y_train = clg_train$outstate
 
 X_train = model.matrix(outstate ~., data = clg_train)[,-1]
-
-Y_ts = clg_test$outstate
-
-X_ts = model.matrix(outstate ~., data = clg_test)[,-1]
 
 ctrl = trainControl(method = "repeatedcv",number = 5, repeats = 5)
 
@@ -85,14 +77,15 @@ clg_data %>%
 # Q2
 
 ```{r smooth_spline}
+set.seed(123123)
 clg_ss_cv = smooth.spline(clg_train$terminal, Y_train, cv = T)
+
+clg_ss_cv_mse = mean((predict(clg_ss_cv,clg_train$terminal,se=F)$y-Y_train)^2)
 
 clg_ss =
   tibble(
     x = list(clg_train$terminal),
     y = list(Y_train),
-    x_t = list(clg_test$terminal),
-    y_t = list(Y_ts),
     df = list(seq(2, 20, length = 5)%/%1)
   ) %>%
   unnest(df) %>%
@@ -104,41 +97,40 @@ clg_ss =
   rbind(list(
     x = list(clg_train$terminal),
     y = list(Y_train),
-    x_t = list(clg_test$terminal),
-    y_t = list(Y_ts),
     df = clg_ss_cv$df,
     model = list(clg_ss_cv)
   )) %>%
   mutate(
-    prediction = map2(.x = x_t,
+    prediction = map2(.x = x,
                       .y = model,
                       ~predict(object = .y,x = .x,se=F)$y),
     df = as.factor(df)
   ) %>%
-  select(df, y_t, prediction, x_t) %>%
-  unnest(c(prediction, y_t,x_t))
+  select(df, y, prediction, x) %>%
+  unnest(c(prediction, y,x))
 
 clg_ss %>%
   group_by(df) %>%
   summarise(mse =
-              mean((y_t - prediction) ^ 2)) %>% 
+              mean((y - prediction) ^ 2)) %>% 
   knitr::kable(caption = "Smooth spline performance with different degree of freedom",digits = 3)
 
 ggplot(clg_ss) +
-  geom_point(aes(x = x_t, y = y_t)) +
-  geom_line(aes(x = x_t, y = prediction, color= df)) +
+  geom_point(aes(x = x, y = y),alpha = 0.05) +
+  geom_line(aes(x = x, y = prediction, color= df)) +
   facet_wrap(df ~ ., nrow = 2) +
   labs(title = "Smooth Spline")
 ```
 
 
 
-The model obtained from CV method has the degree of freedom of `r clg_ss_cv$df` and lambda `r clg_ss_cv$lambda` has the lowest MSE in the model candidates.
+The model obtained from CV method has the degree of freedom of `r clg_ss_cv$df` and lambda `r clg_ss_cv$lambda` has the lowest MSE in the model candidates. The fitted model is almost a smooth line. The $MSE_{tr}$ is `r clg_ss_cv_mse`.
 
 
 
 # Q3
 ```{r gam, cache=T}
+set.seed(123123)
 cl = makePSOCKcluster(5)# if windows, set to 1
 
 registerDoParallel(cl)
@@ -158,24 +150,27 @@ stopCluster(cl)
 
 clg_gam$bestTune
 
+clg_gam_mse = mean((Y_train-predict(clg_gam))^2)
+
 summary(clg_gam$finalModel)
 
 par(mfrow = c(2,4))
 
 plot(clg_gam$finalModel)
 
-par(mfrow=c(1,2))
+par(mfrow=c(2,2))
 for (i in 1:8){
   predictor = clg_gam$finalModel$terms %>% attr("term.labels") %>% .[(2*i-1):(2*i)]
   vis.gam(clg_gam$finalModel,predictor)
 }
 ```
 
-Using caret tuning, the best tuning methods is `select = F` and `method = "REML"`
+Using caret tuning, the best tuning methods is `select = F` and `method = "REML"`. With this method, all variable is applied with spline function except for Indicator of `College` which is not selected by caret. The $MSE_{tr}$ is `r clg_gam_mse`.
 
 # Q4
 
 ```{r mars,cache=T}
+set.seed(123123)
 cl = makePSOCKcluster(5) #if windows, set to 1
 registerDoParallel(cl)
 clg_mars =
@@ -220,13 +215,13 @@ p2 = pdp::partial(clg_mars, pred.var = c("apps", "enroll")) %>%
 grid.arrange(p1,p2,nrow = 2)
 ```
 
+The final model has 3 degree and 30 hints in the model. total of 30 term and 26 predictors are includes in the model. The mse of the MARS model is `r mean((Y_train - predict(clg_mars))^2)`
+
 ```{r resample}
 rmp = caret::resamples(list(gam = clg_gam,
                             mars = clg_mars))
 
 summary(rmp)
-
-
 ```
 
 
