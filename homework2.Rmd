@@ -133,7 +133,7 @@ ggplot(clg_ss) +
 
 
 
-The model obtained from CV method has the degree of freedom of `r clg_ss_cv$df` and $\lambda = $ `r clg_ss_cv$lambda` has the lowest MSE in the model candidates.
+The model obtained from CV method has the degree of freedom of `r clg_ss_cv$df` and lambda `r clg_ss_cv$lambda` has the lowest MSE in the model candidates.
 
 
 
@@ -219,4 +219,14 @@ p2 = pdp::partial(clg_mars, pred.var = c("apps", "enroll")) %>%
 
 grid.arrange(p1,p2,nrow = 2)
 ```
+
+```{r resample}
+rmp = caret::resamples(list(gam = clg_gam,
+                            mars = clg_mars))
+
+summary(rmp)
+
+
+```
+
 
