@@ -1,19 +1,21 @@
 ---
 title: "Homework 3"
+author: "ZHUOHUI LIANG"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-library(tidyverse)
-library(caret)
 library(glmnet)
 library(pls)
 library(splines)
 library(mgcv)
 library(pdp)
+library(klaR)
 library(earth)
 library(doParallel)
 library(ISLR)
+library(tidyverse)
+library(caret)
 
 knitr::opts_chunk$set(
   fig.height = 6,
@@ -32,6 +34,8 @@ options(
 
 scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
+
+set.seed(123123)
 ```
 
 
@@ -47,14 +51,23 @@ Weekly = Weekly %>%
 
 skimr::skim_without_charts(Weekly)
 
-caret::featurePlot(model.matrix(direction~.,Weekly %>% select(-year)),Weekly$direction,"pairs")
+caret::featurePlot(model.matrix(direction~lag1+lag2+lag3+lag4+lag5+volume,Weekly %>% select(-year)),Weekly$direction,"pairs")
 
 Weekly_Tr = Weekly %>% 
   filter(year <=2008)
 
 Weekly_Ts = Weekly %>% 
   filter(year > 2008)
+
+
+partimat(direction~lag1+lag2+lag3+lag4+lag5+volume,Weekly_Tr,method = "lda",nplots.vert=3,nplots.hor=5)
+
+
+partimat(direction~lag1+lag2+lag3+lag4+lag5+volume,Weekly_Tr,method = "qda",nplots.vert=3,nplots.hor=5)
 ```
+
+\ Above images has shown that there're massive overlaying in all predictors,the prediction may perform poorly.
+
 
 ```{r echo=FALSE}
 X_tr = model.matrix(direction~.,Weekly_Tr %>% select(-year))[,-1]
@@ -95,6 +108,9 @@ logistic_prediction =
 confusionMatrix(logistic_prediction,Y_ts)
 ```
 
+The `accuarcy` of the model is 0.462, which is worse than taking a random guessing(0.5). This conclusion can be draw by `Kappa`, which is 0. So this model perform poorly.
+
+
 ## 3
 
 ```{r}
@@ -107,11 +123,17 @@ Weekly_logistic2 =
         preProcess = c("center","scale"))
 ```
 
-```{r roc}
-logistic_roc = pROC::roc(Y_ts,predict(Weekly_logistic2,newdata = X_ts,type = "prob")[,2])
+
+```{r 3_roc}
+logistic_roc = 
+  pROC::roc(Y_ts,predict(Weekly_logistic2,newdata = X_ts,type = "prob")[,2])
+
+ggplotify::as.ggplot(~plot(logistic_roc,legacy.axes = TRUE,,print.auc=T))
 ```
 
-## 4
+ As shown, the model is just slightly better than guessing, with `AUC` = `r logistic_roc$auc`.
+
+## 4-5
 
 ### LDA
 ```{r}
@@ -137,23 +159,60 @@ Weekly_qda =
         metric = "ROC",
         trControl = TRC,
         preProcess = c("center","scale"))
+
+qda_roc = pROC::roc(Y_ts,predict(Weekly_qda,newdata = X_ts,type = "prob")[,2])
 ```
 
-```{r qdaroc}
-qda_roc = pROC::roc(Y_ts,predict(Weekly_qda,newdata = X_ts,type = "prob")[,2])
+```{r knn}
+cl = makePSOCKcluster(5) #if windows, set to 1
+registerDoParallel(cl)
+Weekly_knn = 
+  train(model.matrix(direction~lag1+lag2,Weekly_Tr)[,-1],
+        Y_tr,
+        method = "knn",
+        metric = "ROC",
+        tuneGrid = expand.grid(k=seq(1,200,len=50)),
+        trControl = TRC,
+        preProcess = c("center","scale"))
+stopCluster(cl)
 
+ggplot(Weekly_knn,highlight = T)
+
+knn_roc = pROC::roc(Y_ts,predict(Weekly_knn,newdata = X_ts,type = "prob")[,2])
+```
+
+```{r}
+rsmp = resamples(list(
+  logistic = Weekly_logistic2,
+  lda = Weekly_lda,
+  qda = Weekly_qda,
+  knn = Weekly_knn
+))
+
+summary(rsmp)
+
+bwplot(rsmp,metric = "ROC")
+```
+
+
+
+```{r roc}
 auc = c()
 
-ROC = list(logistic_roc,lda_roc,qda_roc)
+ROC = list(logistic_roc,lda_roc,qda_roc,knn_roc)
 
-for (i in 1:3){
+for (i in 1:4){
   auc = append(auc,ROC[[i]]$auc[1])
   plot(ROC[[i]],col = i, add = T * (i>1), legacy.axes = T * (i==1))
 }
 
 model_name = 
-  c("logistic","LDA","QDA")
+  c("logistic","LDA","QDA","knn")
 
 legend("bottomright",
-       legend = paste0(model_name,"~",round(auc,3)),col=1:3,lwd=2)
+       legend = paste0(model_name,"~",round(auc,3)),col=1:4,lwd=2)
 ```
+
+\ With resampling all models above, none of the models has a mean `ROC` predicability above 60%, and `lda`, although has the highest mean `ROC` but has as large variance, `knn` however, has a higher median and lower variance than `lda`.
+
+\ With the test data, LDA has the highest but still relatively low `AUC`, and followed by `logistic`.
