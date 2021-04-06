@@ -1,0 +1,219 @@
+---
+title: "homework 4"
+author: "Jeffrey Zhuohui Liang"
+date: "3/29/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(pdp)
+library(lasso2)
+library(klaR)
+library(earth)
+library(rpart)
+library(party)
+library(doParallel)
+library(caret)
+library(DALEX)
+library(tidyverse)
+
+knitr::opts_chunk$set(
+  fig.height = 6,
+  fig.width = 8,
+  message = F,
+  echo = T,
+  warning = F,
+  cache = T
+)
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  digits = 3
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+set.seed(123123)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1
+```{r data_step}
+data(Prostate)
+
+Prostate = Prostate %>% 
+  janitor::clean_names()
+
+trainindex = createDataPartition(Prostate$lpsa,p=0.8,list = F)
+
+X_tr = model.matrix(lpsa~.,Prostate[trainindex,])[,-1]
+
+Y_tr = Prostate[trainindex,"lpsa"]
+
+
+X_ts = model.matrix(lpsa~.,Prostate[-trainindex,])[,-1]
+
+Y_ts = Prostate[-trainindex,"lpsa"]
+
+ctrl = trainControl(method = "repeatedcv",number = 5, repeats = 5)
+
+pre = c("center","scale")
+
+```
+
+
+```{r single_tree}
+sng_tree = rpart(lpsa ~ .,
+                     data = Prostate,
+                     subset = trainindex,
+                     control = rpart.control(cp = 0))
+
+plotcp(sng_tree)
+
+cpTable = sng_tree$cptable
+
+minErr = which.min(cpTable[,4])
+
+sng_tree_1se = prune(sng_tree,
+                     cp=cpTable[cpTable[,4]<cpTable[minErr,4]+cpTable[minErr,5],1][1])
+
+sng_tree_min = prune(sng_tree,cp = cpTable[minErr,1][1])
+
+last(sng_tree_min$cptable[,2])
+
+last(sng_tree_1se$cptable[,2])
+
+```
+
+The number of node of minumum RMSE tree is the same as  1se tree's number of node.
+
+# 2
+
+```{r}
+plot(partykit::as.party(sng_tree_1se))
+```
+
+For those observation whom lcavol<-0.479 will go into terminal node 3, which has a mean response near 0.5 with 8 observations.
+
+# 3
+```{r bagging}
+cl = parallel::makePSOCKcluster(5)
+doParallel::registerDoParallel(cl)
+
+sng_tree = train(X_tr,
+                 Y_tr,
+                 method = "rpart",
+                 tuneGrid = expand.grid(cp = exp(seq(-3,-5,len = 20))),
+                 preProcess = pre,
+                 trControl = ctrl
+                 )
+
+stopCluster(cl)
+
+bagging = 
+  train(X_tr,
+        Y_tr,
+        method = "ranger",
+        tuneGrid = expand.grid(mtry = 8,
+                               splitrule = "variance",
+                               min.node.size = 1:20),
+        metric = "RMSE",
+        trControl = ctrl,
+        preProcess = c("center","scale"))
+
+bag_explain = DALEX::explain(bagging,
+                             label = "bagging",
+                             data=X_tr,
+                             y= Y_tr,
+                             verbose = F)
+
+bag_imp = DALEX::model_parts(bag_explain)
+
+plot(bag_imp)
+
+parallel::stopCluster(cl)
+
+ggplot(bagging,highlight = T)
+```
+
+The order of variable importance are `r bag_explain$data %>% as_tibble() %>% names()`.
+
+# 3
+```{r rf}
+cl = parallel::makePSOCKcluster(5)
+doParallel::registerDoParallel(cl)
+
+random_forest = 
+  train(X_tr,
+        Y_tr,
+        method = "ranger",
+        tuneGrid = expand.grid(mtry = 1:7,
+                               splitrule = "variance",
+                               min.node.size = 1:20),
+        metric = "RMSE",
+        trControl = ctrl,
+        preProcess = c("center","scale"))
+
+rf_explain = DALEX::explain(random_forest,
+                             label = "random forest",
+                             data=X_tr,
+                             y= Y_tr,
+                            verbose = F)
+
+rf_imp = DALEX::model_parts(rf_explain)
+
+plot(rf_imp)
+
+parallel::stopCluster(cl)
+```
+
+The order of variable importance are `r rf_explain$data %>% as_tibble() %>% names()`.
+
+# 4
+```{r ada}
+t1 = Sys.time()
+cl = parallel::makePSOCKcluster(5)
+doParallel::registerDoParallel(cl)
+
+adab =   train(X_tr,
+        Y_tr,
+        method = "gbm",
+        tuneGrid = expand.grid(n.trees = c(1e+3,2e+3,3e+3),
+                               interaction.depth = 1:5,
+                               shrinkage = seq(0.01,0.05,len=3),
+                               n.minobsinnode = 1:10),
+        metric = "RMSE",
+        trControl = ctrl,
+        preProcess = c("center","scale"))
+
+adab_explain = DALEX::explain(adab,
+                             label = "random forest",
+                             data=X_tr,
+                             y= Y_tr,
+                            verbose = F)
+
+adab_imp = DALEX::model_parts(adab_explain)
+
+plot(adab_imp)
+
+parallel::stopCluster(cl)
+
+runt = system.time() - t1
+```
+
+The order of variable importance are `r adab_explain$data %>% as_tibble() %>% names()`.
+
+```{r}
+reg_rsmp = 
+  resamples(
+    list(
+      tree = sng_tree_min,
+      bagging = bagging,
+      random_forest = random_forest,
+      boost  = adab
+    )
+  )
+```
+
